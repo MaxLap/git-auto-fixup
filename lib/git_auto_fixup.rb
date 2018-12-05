@@ -13,8 +13,105 @@ require "fileutils"
 # TODO: See about using git apply --cached --unidiff-zero instead of changing any of the data from the disk
 #       This will allow us to not even need a --hard reset for the undo!
 
+#       To write to the index directly:
+#       echo HI | git hash-object -w --stdin
+#       # The sha is the output of hash-object
+#       git update-index --add --cacheinfo 100644 c1e3b52e700b18a2b8e1d2616e9277ab447bddd0 foo.pl
+#       # This allows us to set the index back to exactly what it was, so that things that were not handled are still staged
+
 
 class GitAutoFixup
+  INSERT_CHECK_TO_INSERT_WRAPPING = {recent: :around,
+                                     around: :around,
+                                     above: :above,
+                                     below: :below,
+                                    }
+
+  class Transformation < Struct.new(:git_path, :from_first_line_i, :from_nb_lines, :into_first_line_i, :into_nb_lines)
+    def insertion?
+      from_nb_lines == 0
+    end
+
+    def replace_from_range
+      if insertion?
+        # The insertion is after the specified line
+        # So we must do a manual increment
+        (from_first_line_i + 1)...(from_first_line_i + 1)
+      else
+        (from_first_line_i)...(from_first_line_i + from_nb_lines)
+      end
+    end
+
+    def replace_into_range
+      (into_first_line_i)...(into_first_line_i + into_nb_lines)
+    end
+
+    def lines_for_blame(options = {})
+      insert_wrapping = options[:insert_wrapping] || :around
+
+      first_line_i = from_first_line_i
+      last_line_i = from_first_line_i + from_nb_lines - 1
+
+      if insertion?
+        # First, we apply the basic logic for around. Then we pick what we want in the case.
+        # `git blame` fails if we target before the first line
+        first_line_i -= 1 if first_line_i > 0
+
+        # `git blame` write nothing for lines aften the end, so no need for condition
+        last_line_i += 1
+
+        case insert_wrapping
+        when :around
+          # Already setup
+        when :above
+          # Can't go above the first line, just return nil
+          return nil if from_first_line_i == 0
+
+          last_line_i = first_line_i
+        when :below
+          first_line_i = last_line_i
+        else
+          raise "Bad insert_wrapping value: #{insert_wrapping}"
+        end
+      end
+
+      [first_line_i, last_line_i]
+    end
+
+    def self.for_staged_file(git_path)
+      # Some examples of the diff format
+      #
+      # @@ -15 +15 @@
+      # Line 15 became line 15 after the change
+      # Basically, ',1' is optionnal when only one line
+      #
+      # @@ -15,2 +15,2 @@
+      # Starting at line 15 for 2 lines became line 15 for 2 lines after the change
+      #
+      # @@ -15,0 +16,2 @@
+      # Starting at line 15 for 0 lines became line 16 for 2 lines after the change
+      # This one is weird... when nb lines is 0, things actually happened after the line,
+      # so things were inserted between line 15 and 16.
+
+      diff_lines = `git diff -U0 #{git_path}`.lines
+
+      diff_lines.grep(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/) do
+        match = Regexp.last_match
+        from_line_i = match[1].to_i - 1
+        to_line_i = match[3].to_i - 1
+
+        Transformation.new(
+            git_path,
+            from_line_i,
+            (match[2] || 1).to_i,
+            to_line_i,
+            (match[4] || 1).to_i
+        )
+      end
+    end
+  end
+
+
   MODIFIED_COPY_SUFFIX = "-AUTO_FIXUP_INITIAL_MODIFIED"
   STAGED_COPY_SUFFIX = "-AUTO_FIXUP_INITIAL_STAGED"
 
@@ -59,64 +156,17 @@ class GitAutoFixup
       .map { |file| File.absolute_path(file) }
   end
 
-  # Returns a list of pairs of ranges. The first range is in the source file, the second range is the resulting range.
-  def lines_transformations_in(git_path)
-    # The locations are first_line_
+  def ref_for_transformation(transformation)
+    insert_wrapping = INSERT_CHECK_TO_INSERT_WRAPPING.fetch(@insert_checks)
+    from_line, to_line = transformation.lines_for_blame(insert_wrapping: insert_wrapping)
+    return nil if from_line.nil?
 
-    # @@ -15 +15 @@
-    # Line 15 became line 15 after the change
+    blame_lines = `git blame -l -L #{from_line + 1},#{to_line + 1} -s HEAD #{transformation.git_path}`.lines
 
-    # @@ -15,2 +15,2 @@
-    # Starting at line 15 for 2 lines became line 15 for 2 lines after the change
+    # Lines can start with a ^ for "boundary commits", which in our case means the root commits
+    refs = blame_lines.map { |l| l[/\^?\w+/] }.uniq
 
-    # @@ -15,0 +16,2 @@
-    # Starting at line 15 for 0 lines became line 16 for 2 lines after the change
-    # This one is weird... Because the lines of each don't match...
-
-    diff_lines = `git diff -U0 #{git_path}`.lines
-
-    ranges = diff_lines.grep(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/) do
-      unmodified_line_i = Regexp.last_match(1).to_i - 1
-      modified_line_i = Regexp.last_match(3).to_i - 1
-
-      [unmodified_line_i...(unmodified_line_i + (Regexp.last_match(2) || 1).to_i), modified_line_i...(modified_line_i + (Regexp.last_match(4) || 1).to_i)]
-    end
-
-    ranges
-  end
-
-  def ref_for_transformation(git_path, transformation)
-    start, final = transformation.first
-    from = start.begin
-    if start.count == 0
-      # Then we choose what we do
-      case @insert_checks
-      when :around, :recent
-        # The insertion is after this line. So we select around it
-        to = from + 1
-
-        # Insertion at the top of the file, only check the line after
-        from = 1 if from == 0
-
-        # For insertions at the end of the file, `git blame` write nothing for higher numbers,
-        # so no need to check that case
-      when :above
-        to = from
-        return nil if from == 0
-
-      when :below
-        to = from + 1
-        from = to
-      else
-        raise "Bad insert_checks value: #{@insert_checks}"
-      end
-
-    else
-      to = start.max
-    end
-    blame_lines = `git blame -l -L #{from + 1},#{to + 1} -s HEAD #{git_path}`.lines
-
-    refs = blame_lines.map { |l| l[/\w+/] }.uniq
+    return nil if refs.any? { |ref| ref.start_with?("^") }
 
     return most_recent_ref(*refs) if @insert_checks == :recent
 
@@ -158,10 +208,10 @@ class GitAutoFixup
   def generate_fixups_for_staged_file(git_path)
     file = absolute_from_git(git_path)
     FileUtils.cp(file + STAGED_COPY_SUFFIX, file)
-    transformations = lines_transformations_in(git_path)
+    transformations = Transformation.for_staged_file(git_path)
 
     transformations_and_refs = transformations.map do |transformation|
-      ref = ref_for_transformation(git_path, transformation)
+      ref = ref_for_transformation(transformation)
       next if ref.nil?
 
       [transformation, ref]
@@ -175,16 +225,10 @@ class GitAutoFixup
 
     # Starting from the bottom so that line numbers don't need to be changed
     transformations_and_refs.reverse_each do |transformation, ref|
-      start, final = transformation
-
-      if start.count == 0
-        # The insertion is after the specified line
-        # So we must do a manual increment
-        start = (start.begin + 1)...(start.begin + 1)
-      end
-      current_lines[start] = staged_lines[final]
+      current_lines[transformation.replace_from_range] = staged_lines[transformation.replace_into_range]
 
       File.write(file, current_lines.join)
+
 
       system("git", "add", git_path.to_s)
       system("git", "commit", "--fixup", ref.to_s)
