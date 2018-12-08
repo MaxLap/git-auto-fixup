@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "open3"
 
 # This script will go through staged changes and do fixups (changing last commits to have touched the modified lines).
 # If the change spans multiple commits, this script will skip them.
@@ -10,15 +11,7 @@ require "fileutils"
 #            Call the script
 #            The script will do it's best. The changes that couldn't be handled will remain in the staged files
 
-# TODO: See about using git apply --cached --unidiff-zero instead of changing any of the data from the disk
-#       This will allow us to not even need a --hard reset for the undo!
-
-#       To write to the index directly:
-#       echo HI | git hash-object -w --stdin
-#       # The sha is the output of hash-object
-#       git update-index --add --cacheinfo 100644 c1e3b52e700b18a2b8e1d2616e9277ab447bddd0 foo.pl
-#       # This allows us to set the index back to exactly what it was, so that things that were not handled are still staged
-
+# TODO: support git commit --no-verify
 
 class GitAutoFixup
   INSERT_CHECK_TO_INSERT_WRAPPING = {recent: :around,
@@ -74,7 +67,7 @@ class GitAutoFixup
       [first_line_i, last_line_i]
     end
 
-    def self.for_staged_file(git_path)
+    def self.for_staged_file(git_path, staged_content=nil)
       # Some examples of the diff format
       #
       # @@ -15 +15 @@
@@ -89,9 +82,9 @@ class GitAutoFixup
       # This one is weird... when nb lines is 0, things actually happened after the line,
       # so things were inserted between line 15 and 16.
 
-      diff_lines = `git diff -U0 #{git_path}`.lines
-      #staged_raw_lines = `git show :#{git_path}`.lines.to_a
-      staged_raw_lines = File.read(git_path + STAGED_COPY_SUFFIX).lines.to_a
+      diff_lines = `git diff -U0 --cached #{git_path}`.lines
+      staged_content ||= `git show :#{git_path}`
+      staged_raw_lines = staged_content.lines.to_a
 
       diff_lines.grep(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/) do
         match = Regexp.last_match
@@ -129,6 +122,8 @@ class GitAutoFixup
     @initial_ref = `git rev-parse HEAD`.strip
     # `git merge-base` is important to avoid moving the branch up further
     @rebase_limit_ref = `git merge-base #{rebase_limit} HEAD`.strip
+    # A stash that doesn't appear in the list of stashes, exactly what we want for the undo without
+    # spamming the list of stashes
     @stash_ref = `git stash create`.strip
 
     print_how_to_undo
@@ -191,68 +186,50 @@ class GitAutoFixup
   end
 
 
-  def copy_all_data
-    @staged_git_paths = `git diff --diff-filter=AM --name-only --cached`.split("\n")
-    @staged_git_paths.each do |git_path|
-      File.write(absolute_from_git(git_path) + STAGED_COPY_SUFFIX, `git show :#{git_path}`)
-    end
+  def store_staged_data
+    @staged_content = {}
+    @staged_transformations_per_git_path = {}
 
-    @modified_git_paths = `git diff --diff-filter=AM --name-only`.split("\n")
-    @modified_git_paths.each do |git_path|
-      file = absolute_from_git(git_path)
-      FileUtils.cp(file, file + MODIFIED_COPY_SUFFIX)
+    staged_git_paths = `git diff --diff-filter=AM --name-only --cached`.split("\n")
+    staged_git_paths.each do |git_path|
+      content = `git show :#{git_path}`
+      @staged_content[git_path] = content
+      @staged_transformations_per_git_path[git_path] = Transformation.for_staged_file(git_path, content)
     end
   end
 
   def generate_fixups_for_staged_file(git_path)
-    file = absolute_from_git(git_path)
-    FileUtils.cp(file + STAGED_COPY_SUFFIX, file)
-    transformations = Transformation.for_staged_file(git_path)
-
-    transformations_and_refs = transformations.map do |transformation|
+    current_lines = `git show HEAD:#{git_path}`.lines.to_a
+    # Starting from the bottom so that line numbers don't need to be changed
+    @staged_transformations_per_git_path[git_path].reverse_each do |transformation|
       ref = ref_for_transformation(transformation)
       next if ref.nil?
 
-      [transformation, ref]
-    end
-    transformations_and_refs.compact!
-
-    return if transformations_and_refs.empty?
-
-    current_lines = `git show HEAD:#{git_path}`.lines.to_a
-
-    # Starting from the bottom so that line numbers don't need to be changed
-    transformations_and_refs.reverse_each do |transformation, ref|
       current_lines[transformation.replace_from_range] = transformation.into_lines
 
-      File.write(file, current_lines.join)
+      # We are writing to the index directly
+      hash, _status = Open3.capture2("git hash-object -w --stdin", stdin_data: current_lines.join)
+      hash = hash.strip
 
-      system("git", "add", git_path.to_s)
+      # TODO: We want the mode to be the same it was before
+      system("git", "update-index", "--add", "--cacheinfo", "100644,#{hash},#{git_path}")
       system("git", "commit", "--fixup", ref.to_s)
     end
   end
 
   def run
-    copy_all_data
-    system("git stash")
+    store_staged_data
+    # Remove everything from the staged area
+    system("git reset")
 
-    @staged_git_paths.each do |git_path|
+    @staged_content.each_key do |git_path|
       generate_fixups_for_staged_file(git_path)
     end
 
-    # Need the -i for autosquash. EDITOR=true is to skip the editor opening to let the usage do the interactive rebasem
-    system({"EDITOR" => "true"}, "git", "rebase", "-i", "--autosquash", @rebase_limit_ref.to_s)
-
-    @staged_git_paths.each do |git_path|
-      file = absolute_from_git(git_path)
-      FileUtils.mv(file + STAGED_COPY_SUFFIX, file)
-      system("git", "add", git_path.to_s)
-    end
-
-    @modified_git_paths.each do |git_path|
-      file = absolute_from_git(git_path)
-      FileUtils.mv(file + MODIFIED_COPY_SUFFIX, file)
-    end
+    # Need the -i for autosquash.
+    # EDITOR=true is to skip the editor opening to let the usage do the interactive rebase
+    # --autostash handles the other local changes by stashing them before and after
+    system({"EDITOR" => "true"}, "git", "rebase", "-i", "--autosquash", "--autostash", @rebase_limit_ref.to_s)
 
     print_how_to_undo
   end
