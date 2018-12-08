@@ -27,7 +27,7 @@ class GitAutoFixup
                                      below: :below,
                                     }
 
-  class Transformation < Struct.new(:git_path, :from_first_line_i, :from_nb_lines, :into_first_line_i, :into_nb_lines)
+  class Transformation < Struct.new(:git_path, :from_first_line_i, :from_nb_lines, :into_lines)
     def insertion?
       from_nb_lines == 0
     end
@@ -40,10 +40,6 @@ class GitAutoFixup
       else
         (from_first_line_i)...(from_first_line_i + from_nb_lines)
       end
-    end
-
-    def replace_into_range
-      (into_first_line_i)...(into_first_line_i + into_nb_lines)
     end
 
     def lines_for_blame(options = {})
@@ -94,18 +90,21 @@ class GitAutoFixup
       # so things were inserted between line 15 and 16.
 
       diff_lines = `git diff -U0 #{git_path}`.lines
+      #staged_raw_lines = `git show :#{git_path}`.lines.to_a
+      staged_raw_lines = File.read(git_path + STAGED_COPY_SUFFIX).lines.to_a
 
       diff_lines.grep(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/) do
         match = Regexp.last_match
-        from_line_i = match[1].to_i - 1
-        to_line_i = match[3].to_i - 1
+
+        into_line_i = match[3].to_i - 1
+        into_nb_lines = (match[4] || 1).to_i
+        into_range = into_line_i...(into_line_i + into_nb_lines)
 
         Transformation.new(
             git_path,
-            from_line_i,
+            match[1].to_i - 1,
             (match[2] || 1).to_i,
-            to_line_i,
-            (match[4] || 1).to_i
+            staged_raw_lines[into_range]
         )
       end
     end
@@ -220,15 +219,13 @@ class GitAutoFixup
 
     return if transformations_and_refs.empty?
 
-    staged_lines = File.read(file + STAGED_COPY_SUFFIX).lines.to_a
     current_lines = `git show HEAD:#{git_path}`.lines.to_a
 
     # Starting from the bottom so that line numbers don't need to be changed
     transformations_and_refs.reverse_each do |transformation, ref|
-      current_lines[transformation.replace_from_range] = staged_lines[transformation.replace_into_range]
+      current_lines[transformation.replace_from_range] = transformation.into_lines
 
       File.write(file, current_lines.join)
-
 
       system("git", "add", git_path.to_s)
       system("git", "commit", "--fixup", ref.to_s)
