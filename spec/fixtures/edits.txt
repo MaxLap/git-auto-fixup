@@ -1,0 +1,74 @@
+### Change is on previous commit
+#### Edit first line
+a b c d e -> z b c d e
+z b c d e
+
+#### Edit in middle
+a b c d e -> a b z d e
+a b z d e
+
+#### Edit last line
+a b c d e -> a b c d z
+a b c d z
+
+
+### Change is on 2nd previous commit
+#### Edit first line
+a b c d e   -> z b c d e
+a b c d e f -> z b c d e f
+z b c d e f
+
+#### Edit in middle
+a b c d e   -> a b z d e
+a b c d e f -> a b z d e f
+a b z d e f
+
+#### Edit last line
+a b c d e -> a b c d z
+a b f c d e -> a b f c d z
+a b f c d z
+
+
+### Progressive
+#### Edit first line
+a -> z
+a b -> z b
+a b c -> z b c
+z b c
+
+#### Edit in middle
+a
+a b
+a b c -> a b z
+a b c d -> a b z d
+a b c d e -> a b z d e
+a b z d e
+
+#### Edit last line
+a
+a b
+a b c -> a b z
+a b z
+
+
+### Progressive from end
+#### Edit first line
+c
+b c
+a b c -> z b c
+z b c
+
+#### Edit in middle
+e
+d e
+c d e -> z d e
+b c d e -> b z d e
+a b c d e -> a b z d e
+a b z d e
+
+#### Edit last line
+c -> z
+b c -> b z
+a b c -> a b z
+a b z
+

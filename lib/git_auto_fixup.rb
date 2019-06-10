@@ -13,6 +13,9 @@ require "open3"
 
 # TODO: support git commit --no-verify
 
+class GitExecuteError < StandardError
+end
+
 class GitAutoFixup
   INSERT_CHECK_TO_INSERT_WRAPPING = {recent: :around,
                                      around: :around,
@@ -20,59 +23,83 @@ class GitAutoFixup
                                      below: :below,
                                     }
 
-  class Transformation < Struct.new(:git_path, :from_first_line_i, :from_nb_lines, :into_lines)
+  class Transformation < Struct.new(:git_path, :from_first_line_0i, :from_nb_lines, :into_lines)
     def insertion?
       from_nb_lines == 0
     end
 
-    def replace_from_range
-      if insertion?
-        # The insertion is after the specified line
-        # So we must do a manual increment
-        (from_first_line_i + 1)...(from_first_line_i + 1)
-      else
-        (from_first_line_i)...(from_first_line_i + from_nb_lines)
-      end
+    # Because of the logic of how to ranges work, the ranges for special cases must be
+    # * an insertion at the start: 0...0
+    # * an insertion at the end: size...size
+    def range_to_apply_edit_0i
+      from_first_line_0i...(from_first_line_0i + from_nb_lines)
     end
 
-    def lines_for_blame(options = {})
+    # For insertions, we check based on :insert_wrapping either the line above, below, or both.
+    # For modifications, we check only the replaced lines.
+    def lines_1i_for_blame(options = {})
       insert_wrapping = options[:insert_wrapping] || :around
 
-      first_line_i = from_first_line_i
-      last_line_i = from_first_line_i + from_nb_lines - 1
+      first_line_0i = from_first_line_0i
+      last_line_0i = from_first_line_0i + from_nb_lines - 1
 
       if insertion?
         # First, we apply the basic logic for around. Then we pick what we want in the case.
-        # `git blame` fails if we target before the first line
-        first_line_i -= 1 if first_line_i > 0
 
-        # `git blame` write nothing for lines aften the end, so no need for condition
-        last_line_i += 1
+        first_line_0i -= 1
+        last_line_0i += 1
 
         case insert_wrapping
         when :around
           # Already setup
         when :above
           # Can't go above the first line, just return nil
-          return nil if from_first_line_i == 0
+          return nil if from_first_line_0i == 0
 
-          last_line_i = first_line_i
+          last_line_0i = first_line_0i
         when :below
-          first_line_i = last_line_i
+          first_line_0i = last_line_0i
         else
           raise "Bad insert_wrapping value: #{insert_wrapping}"
         end
       end
 
-      [first_line_i, last_line_i]
+      # `git blame` fails if the start line is out of bound
+      first_line_0i = 0 if first_line_0i < 0
+
+      [first_line_0i + 1, last_line_0i + 1]
     end
 
-    def self.for_staged_file(git_path, staged_content=nil)
+    def self.all_for_staged_file(git_path, staged_content=nil)
+      diff_lines = `git diff -U0 --cached #{git_path}`.lines
+      staged_content ||= `git show :#{git_path}`
+      staged_raw_lines = staged_content.lines.to_a
+      all_for_diff(git_path, diff_lines, staged_raw_lines)
+    end
+
+    def self.all_for_diff(git_path, diff_lines, into_raw_lines)
+      # The diff format is @@ -a,b +c,d @@
+      # `a` and `c` are line number, `b` and `d` are number of lines
+      # The `,b` and `,d` are omitted when their value is 1
+      # The `-` pair is the location in the initial file that are "removed",
+      # the `+` pair is the location in the final file that was "added"
+      # The line numbers (`a` and `c`) are 1-indexed
+      #
+      # If `b` is 0, then it means its an insertion.
+      # If `d` is 0, then it means its a removal. Those can be treated the same
+      # as modifications
+      #
+      # For modifications, line_number is the first line affected, and number of lines
+      # tells you how many lines, including the first, are part of that change in that file.
+      #
+      # For insertions, line_number is the line before the the place where the location will happen.
+      # This means you can get a line_number of 0 here when inserting at the top of a file. 0, for
+      # something that is 1-indexed is kinda odd but can make sense.
+      #
       # Some examples of the diff format
       #
       # @@ -15 +15 @@
       # Line 15 became line 15 after the change
-      # Basically, ',1' is optionnal when only one line
       #
       # @@ -15,2 +15,2 @@
       # Starting at line 15 for 2 lines became line 15 for 2 lines after the change
@@ -81,23 +108,27 @@ class GitAutoFixup
       # Starting at line 15 for 0 lines became line 16 for 2 lines after the change
       # This one is weird... when nb lines is 0, things actually happened after the line,
       # so things were inserted between line 15 and 16.
-
-      diff_lines = `git diff -U0 --cached #{git_path}`.lines
-      staged_content ||= `git show :#{git_path}`
-      staged_raw_lines = staged_content.lines.to_a
-
       diff_lines.grep(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/) do
         match = Regexp.last_match
 
-        into_line_i = match[3].to_i - 1
+        into_line_0i = match[3].to_i - 1
         into_nb_lines = (match[4] || 1).to_i
-        into_range = into_line_i...(into_line_i + into_nb_lines)
+        into_range_0i = into_line_0i...(into_line_0i + into_nb_lines)
+
+        from_first_line_0i = match[1].to_i - 1
+        from_nb_lines = (match[2] || 1).to_i
+
+        if from_nb_lines == 0
+          # In the diff, insertion happens after the specified line
+          # For our logic, its easier to consider that it happens before the specified line
+          from_first_line_0i += 1
+        end
 
         Transformation.new(
             git_path,
-            match[1].to_i - 1,
-            (match[2] || 1).to_i,
-            staged_raw_lines[into_range]
+            from_first_line_0i,
+            from_nb_lines,
+            (into_raw_lines[into_range_0i] if into_raw_lines)
         )
       end
     end
@@ -152,10 +183,10 @@ class GitAutoFixup
 
   def ref_for_transformation(transformation)
     insert_wrapping = INSERT_CHECK_TO_INSERT_WRAPPING.fetch(@insert_checks)
-    from_line, to_line = transformation.lines_for_blame(insert_wrapping: insert_wrapping)
-    return nil if from_line.nil?
+    from_line_1i, to_line_1i = transformation.lines_1i_for_blame(insert_wrapping: insert_wrapping)
+    return nil if from_line_1i.nil?
 
-    blame_lines = `git blame -l -L #{from_line + 1},#{to_line + 1} -s HEAD #{transformation.git_path}`.lines
+    blame_lines = git(*%W(blame -l -L #{from_line_1i},#{to_line_1i} -s HEAD #{transformation.git_path})).lines
 
     # Lines can start with a ^ for "boundary commits", which in our case means the root commits
     refs = blame_lines.map { |l| l[/\^?\w+/] }.uniq
@@ -194,7 +225,7 @@ class GitAutoFixup
     staged_git_paths.each do |git_path|
       content = `git show :#{git_path}`
       @staged_content[git_path] = content
-      @staged_transformations_per_git_path[git_path] = Transformation.for_staged_file(git_path, content)
+      @staged_transformations_per_git_path[git_path] = Transformation.all_for_staged_file(git_path, content)
     end
   end
 
@@ -205,7 +236,7 @@ class GitAutoFixup
       ref = ref_for_transformation(transformation)
       next if ref.nil?
 
-      current_lines[transformation.replace_from_range] = transformation.into_lines
+      current_lines[transformation.range_to_apply_edit_0i] = transformation.into_lines
 
       # We are writing to the index directly
       hash, _status = Open3.capture2("git hash-object -w --stdin", stdin_data: current_lines.join)
@@ -229,8 +260,27 @@ class GitAutoFixup
     # Need the -i for autosquash.
     # EDITOR=true is to skip the editor opening to let the usage do the interactive rebase
     # --autostash handles the other local changes by stashing them before and after
-    system({"EDITOR" => "true"}, "git", "rebase", "-i", "--autosquash", "--autostash", @rebase_limit_ref.to_s)
+    git({"EDITOR" => "true"}, *%W(rebase -i --autosquash --autostash #{@rebase_limit_ref}))
 
     print_how_to_undo
+  end
+
+  def git(*args)
+    if args.first.is_a?(Hash)
+      env = args.first
+      args = args[1..-1]
+      git_cmd = [env, "git", *args.map(&:to_s)]
+    else
+      git_cmd = ["git", *args.map(&:to_s)]
+    end
+
+    stdout_and_stderr_str, status = Open3.capture2e(*git_cmd)
+    exitstatus = status.exitstatus
+
+    if exitstatus > 1 || (exitstatus == 1 && stdout_and_stderr_str != '')
+      raise GitExecuteError.new("Command `#{git_cmd.join(" ")}` : #{stdout_and_stderr_str}")
+    end
+
+    stdout_and_stderr_str
   end
 end

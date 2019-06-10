@@ -1,0 +1,76 @@
+### Change is on previous commit
+#### Insert first line
+a b c d e -> z a b c d e
+z a b c d e
+
+#### Insert in middle
+a b c d e -> a b z c d e
+a b z c d e
+
+#### Insert last line
+a b c d e -> a b c d e z
+a b c d e z
+
+
+### Change is on 2nd previous commit
+#### Insert first line
+a b c d e   -> z a b c d e
+a b c d e f -> z a b c d e f
+z a b c d e f
+
+#### Insert in middle
+a b c d e   -> a b z c d e
+a b c d e f -> a b z c d e f
+a b z c d e f
+
+#### Insert last line
+a b c d e -> a b c d e z
+a b f c d e -> a b f c d e z
+a b f c d e z
+
+
+### Progressive
+#### Insert first line
+a -> z a
+a b -> z a b
+a b c -> z a b c
+z a b c
+
+#### Insert in middle (SKIP)
+# Execution depends on "insert_checks"
+a
+a b
+a b c
+a b c d
+a b z c d
+
+#### Insert last line
+a
+a b
+a b c -> a b c z
+a b c z
+
+
+### Progressive from end
+#### Insert first line
+c
+b c
+a b c -> z a b c
+z a b c
+
+#### Insert in middle (SKIP)
+# Execution depends on "insert_checks"
+d
+c d
+b c d
+a b c d
+a b z c d
+
+#### Insert last line
+c -> c z
+b c -> b c z
+a b c -> a b c z
+a b c z
+
+
+### TODO: Check when there is no final new_line and when there are
