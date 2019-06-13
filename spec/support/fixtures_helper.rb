@@ -80,16 +80,20 @@ module FixturesHelper
   end
 
   class Fixture
-    attr_reader :staged_file_before_execution, :commits_before_execution, :commits_after_execution
+    attr_reader :staged_file_before_execution, :commits_before_execution, :commits_after_execution, :options
     def initialize(data)
       parse(data)
     end
 
     def parse(data)
       lines = data.is_a?(String) ? data.lines : data
+      lines = lines.map { |l| l.gsub(/#.*/, '') }
       lines = lines.grep_v(/\A\s*\z/)
 
-      @staged_file_before_execution = lines.last.strip
+      final_line = lines.last
+      final_commit, options = final_line.split('|', 2)
+      @staged_file_before_execution = final_commit.strip
+      @options = options ? eval(options) : {}
 
       commits = lines[0...-1].map do |line|
         before, after = line.split('->', 2).map(&:strip)

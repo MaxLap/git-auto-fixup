@@ -58,13 +58,36 @@ b c
 a b c -> z a b c
 z a b c
 
-#### Insert in middle (SKIP)
-# Execution depends on "insert_checks"
+#### Insert in middle (checks above)
+d
+c d
+b c d -> b z c d
+a b c d -> a b z c d
+a b z c d | {insert_checks: :above}
+
+#### Insert in middle (checks below) (SKIP)
+# causes a merge conflict
+d
+c d -> z c d
+b c d -> b z c d
+a b c d -> a b z c d
+a b z c d | {insert_checks: :below}
+
+#### Insert in middle (checks around)
+# causes a merge conflict
 d
 c d
 b c d
 a b c d
-a b z c d
+a b z c d | {insert_checks: :around}
+
+#### Insert in middle (checks recent)
+# causes a merge conflict
+d
+c d
+b c d -> b z c d
+a b c d -> a b z c d
+a b z c d | {insert_checks: :recent}
 
 #### Insert last line
 c -> c z

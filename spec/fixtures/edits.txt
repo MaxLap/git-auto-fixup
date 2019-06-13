@@ -72,3 +72,18 @@ b c -> b z
 a b c -> a b z
 a b z
 
+### TODO: Check when there is no final new_line and when there are
+### TODO: Check when there are duplicate lines, either consecutive or not (SKIP)
+
+
+
+a b c d e
+a b z d e
+a x z y e
+
+# This is tricky, z and y are changes to the same previous commit, and the same chunk of changes.
+# But we have since removed part of that shared chunk in the middle. So this can't be applied as a single commit/fixup
+# However, if we do each one individually, it makes sense to work...
+a b c d e
+a b d e
+a z y e

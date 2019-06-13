@@ -145,6 +145,7 @@ class GitAutoFixup
   #                                     :below, takes the commit of the line below
   #                                     :around, takes the commit only if both above and below are the same
   #                                     :recent, takes most recent commit between above and below
+  # output: IO to print to.
   def initialize(options = {})
     rebase_limit = options[:rebase_limit] || "origin/master"
     insert_checks = options[:insert_checks] || :around
@@ -156,12 +157,12 @@ class GitAutoFixup
     # A stash that doesn't appear in the list of stashes, exactly what we want for the undo without
     # spamming the list of stashes
     @stash_ref = `git stash create`.strip
-
+    @output = options[:output] || STDOUT
     print_how_to_undo
   end
 
   def print_how_to_undo
-    puts "To undo: git reset --hard #{@initial_ref}; git stash apply --index #{@stash_ref}"
+    @output.puts "To undo: git reset --hard #{@initial_ref}; git stash apply --index #{@stash_ref}"
   end
 
   def git_root
@@ -244,14 +245,14 @@ class GitAutoFixup
 
       # TODO: We want the mode to be the same it was before
       system("git", "update-index", "--add", "--cacheinfo", "100644,#{hash},#{git_path}")
-      system("git", "commit", "--fixup", ref.to_s)
+      system("git", "commit", "--quiet", "--fixup", ref.to_s)
     end
   end
 
   def run
     store_staged_data
     # Remove everything from the staged area
-    system("git reset")
+    system("git reset --quiet")
 
     @staged_content.each_key do |git_path|
       generate_fixups_for_staged_file(git_path)
