@@ -81,6 +81,19 @@ module FixturesHelper
 
   class Fixture
     attr_reader :staged_file_before_execution, :commits_before_execution, :commits_after_execution, :options
+
+    # The data is a multiline string that looks like this:
+    #   d
+    #   c d -> z c d
+    #   b c d -> b z c d
+    #   a b c d -> a b z c d
+    #   a b z c d | {insert_checks: :below}
+    #
+    # * Each line but the last represents a commit
+    # * The last line means the state of the file when running auto-fixup
+    # * Each letter represents a line in the commit.
+    # * The -> indicate that after running auto-fixup, the commit will be modified into the right-side
+    # * The | on the last line indicate options passed to auto-fixup
     def initialize(data)
       parse(data)
     end
