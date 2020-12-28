@@ -25,7 +25,9 @@ RSpec.describe GitAutoFixup do
         g.commit("Commit ##{i+1}")
       end
 
-      File.write("#{root}/my_file.txt", format_commit_to_lines(fixture.staged_file_before_execution).join)
+      staged_file_content = format_commit_to_lines(fixture.staged_file_before_execution).join
+
+      File.write("#{root}/my_file.txt", staged_file_content)
       g.add("my_file.txt")
 
       io = StringIO.new
@@ -40,8 +42,22 @@ RSpec.describe GitAutoFixup do
         content.should == expected
       end
 
-      g.diff.should be_an_none
-      g.diff('--cached').should be_an_none
+      unstaged_diff = `git -C #{root} diff`
+      staged_diff = `git -C #{root} diff --cached`
+
+      # Should never leave differences unstaged
+      unstaged_diff.should be_empty
+
+      # Should always end up with the same code
+      content_as_it_is_staged = `git -C #{root} show :my_file.txt`
+
+      content_as_it_is_staged.should == staged_file_content
+
+      if fixture.staged_file_before_execution == fixture.commits_after_execution.last
+        staged_diff.should be_empty
+      else
+        staged_diff.should_not be_empty
+      end
     end
   end
 end
