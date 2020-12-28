@@ -251,8 +251,13 @@ class GitAutoFixup
 
   def run
     store_staged_data
+
+    system("git commit --quiet -m 'auto-fixup temp commit'")
+    # The only simple way of storing all that is currently staged is to make a commit
+    @commit_with_staged_diff_ref = `git rev-parse HEAD`.strip
+
     # Remove everything from the staged area
-    system("git reset --quiet")
+    system("git reset --quiet #{@initial_ref}")
 
     @staged_content.each_key do |git_path|
       generate_fixups_for_staged_file(git_path)
@@ -262,6 +267,12 @@ class GitAutoFixup
     # EDITOR=true is to skip the editor opening to let the usage do the interactive rebase
     # --autostash handles the other local changes by stashing them before and after
     git({"EDITOR" => "true"}, *%W(rebase -i --autosquash --autostash #{@rebase_limit_ref}))
+    final_ref = `git rev-parse HEAD`.strip
+
+    # We re-stage changes that were initially staged by going to the commit with all staged changes
+    # and then `reset --soft` to our final commit. (--soft will leave the changes as staged)
+    system("git reset --quiet #{@commit_with_staged_diff_ref}")
+    system("git reset --soft --quiet #{final_ref}")
 
     print_how_to_undo
   end
