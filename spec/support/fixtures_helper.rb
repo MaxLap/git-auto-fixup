@@ -9,7 +9,7 @@ module FixturesHelper
         file_chunk.rechunk(FixturesHelper::SECTION_REGEX).each do |section_chunk|
           describe section_chunk.name do
             section_chunk.rechunk(FixturesHelper::EXAMPLE_REGEX).each do |example_chunk|
-              it(example_chunk.name) do
+              it(example_chunk.name + " (line #{example_chunk.first_line_no})") do
                 self.instance_exec(example_chunk, section_chunk, file_chunk, &block)
               end
             end
@@ -59,11 +59,11 @@ module FixturesHelper
       chunks = all_lines.slice_before(pattern)
       chunks.map do |lines|
         if lines.first =~ pattern
-          chunk_name = $1
+          chunk_name = $1.strip
           lines = lines[1..-1]
           line_no += 1
         else
-          chunk_name = 'Default'
+          chunk_name = 'Top'
         end
         next if lines.grep(/\S/).empty?
         chunk = FixtureChunk.new(chunk_name, lines, line_no)
