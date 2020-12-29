@@ -162,7 +162,11 @@ class GitAutoFixup
   end
 
   def print_how_to_undo
-    @output.puts "To undo: git reset --hard #{@initial_ref}; git stash apply --index #{@stash_ref}"
+    @output.puts(how_to_undo_string)
+  end
+
+  def how_to_undo_string
+    "To undo: git reset --hard #{@initial_ref}; git stash apply --index #{@stash_ref}"
   end
 
   def git_root
