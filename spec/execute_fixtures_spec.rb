@@ -20,12 +20,10 @@ RSpec.describe GitAutoFixup do
       g = Git.init(root)
       g.commit("Initial commit", allow_empty: true)
       fixture.commits_before_execution.each_with_index do |content, i|
-        File.write("#{root}/my_file.txt", format_commit_to_lines(content).join)
-        g.add("my_file.txt")
-        g.commit("Commit ##{i+1}")
+        new_commit_from_short_form(g, content, filename: "my_file.txt")
       end
 
-      staged_file_content = format_commit_to_lines(fixture.staged_file_before_execution).join
+      staged_file_content = commit_short_form_to_full_form(fixture.staged_file_before_execution).join
 
       File.write("#{root}/my_file.txt", staged_file_content)
       g.add("my_file.txt")
@@ -38,7 +36,7 @@ RSpec.describe GitAutoFixup do
 
       commits = g.log.to_a.reverse.reject { |commit| commit.message == "Initial commit" }
       commits.zip(fixture.commits_after_execution) do |commit, expected|
-        content = format_commit_to_spaces(g.show(commit, "my_file.txt").lines)
+        content = commit_full_form_to_short_form(g.show(commit, "my_file.txt").lines)
         content.should == expected
       end
 

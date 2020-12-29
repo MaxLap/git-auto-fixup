@@ -14,8 +14,8 @@ describe GitAutoFixup::Transformation do
   let(:g) { @g }
 
   def diff_lines(content1, content2)
-    hash1, _status = Open3.capture2(*%W(git -C #{root} hash-object -w --stdin), stdin_data: format_commit_to_lines(content1).join)
-    hash2, _status = Open3.capture2(*%W(git -C #{root} hash-object -w --stdin), stdin_data: format_commit_to_lines(content2).join)
+    hash1, _status = Open3.capture2(*%W(git -C #{root} hash-object -w --stdin), stdin_data: commit_short_form_to_full_form(content1).join)
+    hash2, _status = Open3.capture2(*%W(git -C #{root} hash-object -w --stdin), stdin_data: commit_short_form_to_full_form(content2).join)
 
     `git -C #{root} diff -U0 #{hash1.strip} #{hash2.strip}`.lines
   end

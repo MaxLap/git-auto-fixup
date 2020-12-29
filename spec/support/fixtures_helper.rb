@@ -26,7 +26,9 @@ module FixturesHelper
     end
   end
 
-  def format_commit_to_lines(string)
+  # Turns "a b c d" into "a\nb\nc\nd\n"
+  # Turns "a b c d\\" into "a\nb\nc\nd"
+  def commit_short_form_to_full_form(string)
     string = string.strip
     if string.end_with?("\\")
       string = string[0...-1].strip
@@ -36,10 +38,17 @@ module FixturesHelper
     string.gsub(/\s+/, "\n").lines
   end
 
-  def format_commit_to_spaces(array)
+  def commit_full_form_to_short_form(array)
     s = array.join.gsub(/\s+/, " ")
     s = s + "\\" if s.end_with?(" ")
     s
+  end
+
+  def new_commit_from_short_form(g, short_form_content, filename: "my_file.txt", commit_msg: nil)
+    commit_msg ||= "Commit ##{g.log.size}"
+    File.write("#{g.dir.path}/#{filename}", commit_short_form_to_full_form(short_form_content).join)
+    g.add("my_file.txt")
+    g.commit(commit_msg)
   end
 
   #
@@ -90,7 +99,7 @@ module FixturesHelper
     #   a b z c d | {insert_checks: :below}
     #
     # * Each line but the last represents a commit
-    # * The last line means the state of the file when running auto-fixup
+    # * The last line is not a commit, it's the state of the file when running auto-fixup
     # * Each letter represents a line in the commit.
     # * The -> indicate that after running auto-fixup, the commit will be modified into the right-side
     # * The | on the last line indicate options passed to auto-fixup
