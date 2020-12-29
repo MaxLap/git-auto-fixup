@@ -31,7 +31,17 @@ RSpec.describe GitAutoFixup do
       io = StringIO.new
       Dir.chdir(root) do
         options = {rebase_limit: `git rev-list --max-parents=0 HEAD`.strip, output: io}
-        GitAutoFixup.new(options.merge(fixture.options)).run
+        begin
+          GitAutoFixup.new(options.merge(fixture.options)).run
+        ensure
+          e = $!
+          if e && %w(1 true).include?(ENV['RUN_PRY'])
+            puts
+            puts e
+            puts root
+            binding.pry
+          end
+        end
       end
 
       commits = g.log.to_a.reverse.reject { |commit| commit.message == "Initial commit" }

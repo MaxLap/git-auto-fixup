@@ -2,13 +2,24 @@
 
 require "bundler/setup"
 require "git_auto_fixup"
+require "git"
+require "tmpdir"
+require "pry"
 
-# You can add fixtures and/or initialization code here to make experimenting
-# with your gem easier. You can also use a different console, if you like.
+require_relative "../spec/support/fixtures_helper"
+include FixturesHelper
 
-# (If you use this, don't forget to add pry to your Gemfile!)
-# require "pry"
-# Pry.start
+Dir.mktmpdir("git_auto_fixup_test") do |root|
+  g = Git.init(root)
+  g.commit("Initial commit", allow_empty: true)
+  initial_commit_ref = `git -C #{root} rev-list --max-parents=0 HEAD`
 
-require "irb"
-IRB.start(__FILE__)
+  puts
+  puts "cd #{root}"
+  puts "Useful command:"
+  puts "* new_commit_from_short_form(g, 'a b c')"
+  puts "* Dir.chdir(root) { GitAutoFixup.new(rebase_limit: #{initial_commit_ref.strip.inspect}).run }"
+
+  binding.pry
+end
+
