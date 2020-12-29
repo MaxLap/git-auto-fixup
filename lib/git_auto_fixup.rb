@@ -158,6 +158,8 @@ class GitAutoFixup
     # spamming the list of stashes
     @stash_ref = `git stash create`.strip
     @output = options[:output] || STDOUT
+    @fixup_commit_refs = Set.new
+    @fixup_commit_refs_that_failed = []
     print_how_to_undo
   end
 
@@ -221,6 +223,11 @@ class GitAutoFixup
     oldest == @rebase_limit_ref
   end
 
+  # Used for test system
+  # Fixups that made merge conflicts
+  def number_of_failed_fixups
+    @fixup_commit_refs_that_failed.size
+  end
 
   def store_staged_data
     @staged_content = {}
@@ -250,13 +257,15 @@ class GitAutoFixup
       # TODO: We want the mode to be the same it was before
       system("git", "update-index", "--add", "--cacheinfo", "100644,#{hash},#{git_path}")
       system("git", "commit", "--quiet", "--fixup", ref.to_s)
+
+      @fixup_commit_refs << `git rev-parse HEAD`.strip
     end
   end
 
   def run
     store_staged_data
 
-    system("git commit --quiet -m 'auto-fixup temp commit'")
+    system("git commit --quiet -m 'auto-fixup temp commit of staged changes'")
     # The only simple way of storing all that is currently staged is to make a commit
     @commit_with_staged_diff_ref = `git rev-parse HEAD`.strip
 
@@ -270,8 +279,33 @@ class GitAutoFixup
     # Need the -i for autosquash.
     # EDITOR=true is to skip the editor opening to let the usage do the interactive rebase
     # --autostash handles the other local changes by stashing them before and after
-    git({"EDITOR" => "true"}, *%W(rebase -i --autosquash --autostash #{@rebase_limit_ref}))
+    command_to_run = [{"EDITOR" => "true"}, *%W(rebase -i --autosquash --autostash #{@rebase_limit_ref})]
+
+    while command_to_run
+      begin
+        git(*command_to_run)
+        command_to_run = nil
+      rescue GitExecuteError => e
+        raise if `git diff --name-only --diff-filter=U`.empty?
+        # We are in a merge conflict
+        failed_commit_ref = `git rev-parse REBASE_HEAD`.strip
+        if @fixup_commit_refs.include?(failed_commit_ref)
+          # The conflict was in one of our fixups, skip it, it will end up in the still staged changes
+          @fixup_commit_refs_that_failed << failed_commit_ref
+          command_to_run = %w(rebase --skip)
+        else
+          raise
+        end
+      end
+    end
+
     final_ref = `git rev-parse HEAD`.strip
+
+    # Reapply the changes that generated merge conflicts. By skipping them,
+    # these changes were removed from the local dir
+    @fixup_commit_refs_that_failed.each do |ref|
+      system("git cherry-pick #{ref} --no-commit")
+    end
 
     # We re-stage changes that were initially staged by going to the commit with all staged changes
     # and then `reset --soft` to our final commit. (--soft will leave the changes as staged)
@@ -294,7 +328,7 @@ class GitAutoFixup
     exitstatus = status.exitstatus
 
     if exitstatus > 1 || (exitstatus == 1 && stdout_and_stderr_str != '')
-      raise GitExecuteError.new("Command `#{git_cmd.join(" ")}` : #{stdout_and_stderr_str}")
+      raise GitExecuteError.new("Command `#{git_cmd.join(" ")}` :\n#{stdout_and_stderr_str.gsub("\r", "\n")}")
     end
 
     stdout_and_stderr_str

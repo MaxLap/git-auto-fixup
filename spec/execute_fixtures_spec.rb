@@ -16,6 +16,7 @@ RSpec.describe GitAutoFixup do
 
   each_fixture do |fixture, example_chunk, section_chunk|
     skip if example_chunk.name.include?("(SKIP)") || section_chunk.name.include?("(SKIP)")
+    gaf = nil
     Dir.mktmpdir("git_auto_fixup_test") do |root|
       g = Git.init(root)
       g.commit("Initial commit", allow_empty: true)
@@ -32,10 +33,11 @@ RSpec.describe GitAutoFixup do
       Dir.chdir(root) do
         options = {rebase_limit: `git rev-list --max-parents=0 HEAD`.strip, output: io}
         begin
-          GitAutoFixup.new(options.merge(fixture.options)).run
+          gaf = GitAutoFixup.new(options.merge(fixture.run_options))
+          gaf.run
         ensure
           e = $!
-          if e && %w(1 true).include?(ENV['RUN_PRY'])
+          if %w(always).include?(ENV['RUN_PRY']) || e && %w(1 true).include?(ENV['RUN_PRY'])
             puts
             puts e
             puts root
@@ -49,6 +51,8 @@ RSpec.describe GitAutoFixup do
         content = commit_full_form_to_short_form(g.show(commit, "my_file.txt").lines)
         content.should == expected
       end
+
+      gaf.number_of_failed_fixups.should == (fixture.test_options[:nb_merge_conflicts] || 0)
 
       unstaged_diff = `git -C #{root} diff`
       staged_diff = `git -C #{root} diff --cached`

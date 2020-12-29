@@ -30,18 +30,33 @@ a b f c d z
 
 
 ### Progressive
-#### Edit first line
-a -> z
-a b -> z b
-a b c -> z b c
+#### Edit first line of first commit
+a1 a2 -> z a2
+a1 a2 b -> z a2 b
+a1 a2 b c -> z a2 b c
+z a2 b c
+
+#### Edit last line of first commit
+%test {nb_merge_conflicts: 1}
+a1 a2
+a1 a2 b
+a1 a2 b c
+a1 z b c
+
+#### Edit first line (whole commit)
+%test {nb_merge_conflicts: 1}
+a
+a b
+a b c
 z b c
 
 #### Edit in middle
+%test {nb_merge_conflicts: 1}
 a
 a b
-a b c -> a b z
-a b c d -> a b z d
-a b c d e -> a b z d e
+a b c
+a b c d
+a b c d e
 a b z d e
 
 #### Edit last line
@@ -59,17 +74,32 @@ a b c -> z b c
 z b c
 
 #### Edit in middle
+%test {nb_merge_conflicts: 1}
 e
 d e
-c d e -> z d e
-b c d e -> b z d e
-a b c d e -> a b z d e
+c d e
+b c d e
+a b c d e
 a b z d e
 
-#### Edit last line
-c -> z
-b c -> b z
-a b c -> a b z
+#### Edit first line of first commit
+%test {nb_merge_conflicts: 1}
+c1 c2
+b c1 c2
+a b c1 c2
+a b z c2
+
+#### Edit last line of first commit
+c1 c2 -> c1 z
+b c1 c2 -> b c1 z
+a b c1 c2 -> a b c1 z
+a b c1 z
+
+#### Edit last line (whole commit)
+%test {nb_merge_conflicts: 1}
+c
+b c
+a b c
 a b z
 
 ### TODO: Check when there is no final new_line and when there are

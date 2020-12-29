@@ -1,0 +1,11 @@
+#### Insert and blocked modification
+%test {nb_merge_conflicts: 1}
+a b c d e -> a b c d e f
+a z c d e -> a z c d e f
+a z y d e f
+
+#### 2 merge conflicts
+%test {nb_merge_conflicts: 2}
+a b c
+b
+x b z

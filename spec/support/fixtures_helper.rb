@@ -89,7 +89,8 @@ module FixturesHelper
   end
 
   class Fixture
-    attr_reader :staged_file_before_execution, :commits_before_execution, :commits_after_execution, :options
+    attr_reader :staged_file_before_execution, :commits_before_execution, :commits_after_execution, :run_options,
+                :test_options
 
     # The data is a multiline string that looks like this:
     #   d
@@ -110,12 +111,19 @@ module FixturesHelper
     def parse(data)
       lines = data.is_a?(String) ? data.lines : data
       lines = lines.map { |l| l.gsub(/#.*/, '') }
+      run_lines, lines = lines.partition { |l| l =~ /%run/ }
+      test_lines, lines = lines.partition { |l| l =~ /%test/ }
       lines = lines.grep_v(/\A\s*\z/)
 
-      final_line = lines.last
-      final_commit, options = final_line.split('|', 2)
-      @staged_file_before_execution = final_commit.strip
-      @options = options ? eval(options) : {}
+      raise "Can only have a single %run per fixture" if run_lines.size > 1
+      raise "Can only have a single %test per fixture" if test_lines.size > 1
+
+      @staged_file_before_execution = lines.last.strip
+
+      @run_options = eval((run_lines.first || "").partition(/%run/).last) || {}
+      @test_options = eval((test_lines.first || "").partition(/%test/).last) || {}
+      @run_options = @run_options.symbolize_keys
+      @test_options = @test_options.symbolize_keys
 
       commits = lines[0...-1].map do |line|
         before, after = line.split('->', 2).map(&:strip)

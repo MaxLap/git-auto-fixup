@@ -6,6 +6,7 @@ require "tmpdir"
 require "pry"
 require "git"
 require "fileutils"
+require "active_support/all"
 require_relative "support/fixtures_helper"
 
 RSpec.configure do |config|

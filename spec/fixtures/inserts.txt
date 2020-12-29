@@ -59,35 +59,37 @@ a b c -> z a b c
 z a b c
 
 #### Insert in middle (checks above)
+%run {insert_checks: :above}
 d
 c d
 b c d -> b z c d
 a b c d -> a b z c d
-a b z c d | {insert_checks: :above}
+a b z c d
 
 #### Insert in middle (checks below) (SKIP)
-# causes a merge conflict
+%run {insert_checks: :below}
+%test {nb_merge_conflicts: 1}
 d
 c d -> z c d
 b c d -> b z c d
 a b c d -> a b z c d
-a b z c d | {insert_checks: :below}
+a b z c d
 
 #### Insert in middle (checks around)
-# causes a merge conflict
+%run {insert_checks: :around}
 d
 c d
 b c d
 a b c d
-a b z c d | {insert_checks: :around}
+a b z c d
 
 #### Insert in middle (checks recent)
-# causes a merge conflict
+%run {insert_checks: :recent}
 d
 c d
 b c d -> b z c d
 a b c d -> a b z c d
-a b z c d | {insert_checks: :recent}
+a b z c d
 
 #### Insert last line
 c -> c z
