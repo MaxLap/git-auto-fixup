@@ -36,12 +36,19 @@ a b -> z a b
 a b c -> z a b c
 z a b c
 
-#### Insert in middle (SKIP)
-# Execution depends on "insert_checks"
+#### Insert in middle
 a
 a b
 a b c
 a b c d
+a b z c d
+
+#### Insert in middle
+%run {insert_checks: :recent}
+a
+a b
+a b c -> a b z c
+a b c d -> a b z c d
 a b z c d
 
 #### Insert last line
@@ -58,25 +65,7 @@ b c
 a b c -> z a b c
 z a b c
 
-#### Insert in middle (checks above)
-%run {insert_checks: :above}
-d
-c d
-b c d -> b z c d
-a b c d -> a b z c d
-a b z c d
-
-#### Insert in middle (checks below) (SKIP)
-%run {insert_checks: :below}
-%test {nb_merge_conflicts: 1}
-d
-c d -> z c d
-b c d -> b z c d
-a b c d -> a b z c d
-a b z c d
-
 #### Insert in middle (checks around)
-%run {insert_checks: :around}
 d
 c d
 b c d

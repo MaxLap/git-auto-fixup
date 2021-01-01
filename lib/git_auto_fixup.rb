@@ -17,12 +17,6 @@ class GitExecuteError < StandardError
 end
 
 class GitAutoFixup
-  INSERT_CHECK_TO_INSERT_WRAPPING = {recent: :around,
-                                     around: :around,
-                                     above: :above,
-                                     below: :below,
-                                    }
-
   class Transformation < Struct.new(:git_path, :from_first_line_0i, :from_nb_lines, :into_lines)
     def insertion?
       from_nb_lines == 0
@@ -35,11 +29,9 @@ class GitAutoFixup
       from_first_line_0i...(from_first_line_0i + from_nb_lines)
     end
 
-    # For insertions, we check based on :insert_wrapping either the line above, below, or both.
+    # For insertions, we check line above and below
     # For modifications, we check only the replaced lines.
-    def lines_1i_for_blame(options = {})
-      insert_wrapping = options[:insert_wrapping] || :around
-
+    def lines_1i_for_blame
       first_line_0i = from_first_line_0i
       last_line_0i = from_first_line_0i + from_nb_lines - 1
 
@@ -48,20 +40,6 @@ class GitAutoFixup
 
         first_line_0i -= 1
         last_line_0i += 1
-
-        case insert_wrapping
-        when :around
-          # Already setup
-        when :above
-          # Can't go above the first line, just return nil
-          return nil if from_first_line_0i == 0
-
-          last_line_0i = first_line_0i
-        when :below
-          first_line_0i = last_line_0i
-        else
-          raise "Bad insert_wrapping value: #{insert_wrapping}"
-        end
       end
 
       # `git blame` fails if the start line is out of bound
@@ -141,15 +119,12 @@ class GitAutoFixup
   # rebase_limit: This is the limit of how far back this script can rebase.
   #               Will not alter that commit or before it. (default to master)
   # insert_checks: For insertions where nothing is modified, this decides how to select the commit to modify
-  #                Possible values are: :above, takes the commit of the line above
-  #                                     :below, takes the commit of the line below
-  #                                     :around, takes the commit only if both above and below are the same
+  #                Possible values are: :around, (default) takes the commit only if both above and below are the same
   #                                     :recent, takes most recent commit between above and below
   # output: IO to print to.
   def initialize(options = {})
     rebase_limit = options[:rebase_limit] || "origin/master"
-    insert_checks = options[:insert_checks] || :around
-    @insert_checks = insert_checks
+    @insert_checks = options[:insert_checks] || :around
 
     @initial_ref = `git rev-parse HEAD`.strip
     # `git merge-base` is important to avoid moving the branch up further
@@ -189,8 +164,7 @@ class GitAutoFixup
   end
 
   def ref_for_transformation(transformation)
-    insert_wrapping = INSERT_CHECK_TO_INSERT_WRAPPING.fetch(@insert_checks)
-    from_line_1i, to_line_1i = transformation.lines_1i_for_blame(insert_wrapping: insert_wrapping)
+    from_line_1i, to_line_1i = transformation.lines_1i_for_blame
     return nil if from_line_1i.nil?
 
     blame_lines = git(*%W(blame -l -L #{from_line_1i},#{to_line_1i} -s HEAD #{transformation.git_path})).lines
