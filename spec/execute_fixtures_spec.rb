@@ -20,9 +20,7 @@ RSpec.describe GitAutoFixup do
     Dir.mktmpdir("git_auto_fixup_test") do |root|
       g = Git.init(root)
       g.commit("Initial commit", allow_empty: true)
-      fixture.commits_before_execution.each_with_index do |content, i|
-        new_commit_from_short_form(g, content, filename: "my_file.txt")
-      end
+      new_commits_from_fixture(g, fixture, filename: "my_file.txt")
 
       staged_file_content = commit_short_form_to_full_form(fixture.staged_file_before_execution).join
 
@@ -46,13 +44,13 @@ RSpec.describe GitAutoFixup do
         end
       end
 
+      gaf.number_of_failed_fixups.should == (fixture.test_options[:nb_merge_conflicts] || 0)
+
       commits = g.log.to_a.reverse.reject { |commit| commit.message == "Initial commit" }
       commits.zip(fixture.commits_after_execution) do |commit, expected|
         content = commit_full_form_to_short_form(g.show(commit, "my_file.txt").lines)
         content.should == expected
       end
-
-      gaf.number_of_failed_fixups.should == (fixture.test_options[:nb_merge_conflicts] || 0)
 
       unstaged_diff = `git -C #{root} diff`
       staged_diff = `git -C #{root} diff --cached`

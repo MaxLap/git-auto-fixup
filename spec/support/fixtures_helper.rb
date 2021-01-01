@@ -51,6 +51,12 @@ module FixturesHelper
     g.commit(commit_msg)
   end
 
+  def new_commits_from_fixture(g, fixture, filename: "my_file.txt")
+    fixture.commits_before_execution.each_with_index do |content, i|
+      new_commit_from_short_form(g, content, filename: filename)
+    end
+  end
+
   #
   # Below are just what is needed for the above method
   #
